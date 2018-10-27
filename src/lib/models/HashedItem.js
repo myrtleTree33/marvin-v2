@@ -8,7 +8,7 @@ const hashedItemSchema = new Schema({
     unique: true,
     required: true
   },
-  hash: {
+  hashedStr: {
     type: String,
     required: true
   },
@@ -17,7 +17,7 @@ const hashedItemSchema = new Schema({
     default: Date.now,
     required: true
   },
-  intervalSecs: {
+  intervalMs: {
     type: Number,
     required: true
   }

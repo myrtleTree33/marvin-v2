@@ -2,11 +2,15 @@ import cheerio from 'cheerio';
 import axios from 'axios';
 import sleep from 'await-sleep';
 
-import Cache from './DistributedCache';
-
 import { resolveUrl, getBaseUrl } from './UrlUtils';
 import logger from './util/logger';
-import { genNumArray } from './Utils';
+import { genNumArray, hash } from './Utils';
+import HashedItem from './models/HashedItem';
+import Item from './models/Item';
+
+const DEFAULT_CACHE_TIME_MS = 1000 * 60 * 60 * 2; // 2 hours
+const MIN_CACHE_TIME_MS = 1000 * 60 * 60 * 2; // 2 hours
+const MAX_CACHE_TIME_MS = 1000 * 60 * 60 * 24 * 2; // 2 Days
 
 class Marvin {
   constructor({
@@ -20,7 +24,6 @@ class Marvin {
     this.randInterval = randInterval;
     this.numJobs = numJobs;
     this.jobsIntervalMaxSeedMs = jobsIntervalMaxSeedMs;
-    this.cache = new Cache();
 
     // load URL by default, if specified.
     if (rootUrl) {
@@ -30,26 +33,47 @@ class Marvin {
     logger.info('No rootURL specified; proceeding to draw from queue.');
   }
 
+  async enqueue({ rootUrl, url, priority }) {
+    const item = new Item({ rootUrl, url, priority });
+    await Item.findOneAndUpdate(
+      {
+        url
+      },
+      item,
+      { upsert: true }
+    );
+    logger.info(`Adding URL=${url} to queue.`);
+  }
+
   loadUrl({ url, priority = -1 }) {
     (async () => {
-      this.cache.loadUrl({ url, priority });
-      logger.info(`Addin URL=${url} to queue.`);
+      await this.enqueue({ rootUrl: url, url, priority });
     })();
     return this;
   }
 
+  async next() {
+    const nextItem = await Item.findOneAndDelete({});
+    if (!this.nextItem) {
+      return Promise.resolve(null);
+    }
+    return nextItem;
+  }
+
   start() {
     logger.info('Marvin V2 started.');
-    const { cache, minInterval, randInterval } = this;
+    const { minInterval, randInterval } = this;
     const timeDelay = minInterval + Math.random() * randInterval;
 
     const runJob = jobId => {
       (async () => {
         let scrapeSuccessful = false;
         while (!scrapeSuccessful) {
-          const item = await cache.next();
+          const item = await this.next();
+
+          // attempt to scrape page if item in queue
           if (item) {
-            scrapeSuccessful = true;
+            scrapeSuccessful = false;
             try {
               scrapeSuccessful = await this.scrapePage(jobId, item);
             } catch (e) {}
@@ -79,43 +103,95 @@ class Marvin {
     });
   }
 
-  // TODO debug here ----------------------------------
-  async scrapePage(jobId, item) {
-    const { url, rootUrl } = item;
+  async scrapeAllLinksAndPutInQueue(rootUrl, data) {
     try {
-      const result = await axios.get(url);
-      const $ = cheerio.load(result.data);
-      // store the page asynchronously
-      this.store.upsert({ url, htmlText: result.data });
-      const numLinks = $('a').length;
-      logger.info(
-        `[JobId=${jobId}] Scraping url=${url} ${numLinks} links found`
-      );
-
+      const $ = cheerio.load(data);
+      // enqueue each URL found
       $('a').each((i, link) => {
         (async () => {
           const expandedRelUrl = $(link).attr('href');
           const expandedUrl = resolveUrl(rootUrl, expandedRelUrl);
-          if (expandedUrl) {
-            const isAdded = await this.cache.add({
-              url: expandedUrl,
-              rootUrl: getBaseUrl(expandedUrl),
-              priority: 1
-            });
-
-            // TODO there is issue with duplicate URLs
-            if (isAdded) {
-              logger.info(`[JobId=${jobId}] Added ${expandedUrl}`);
-            }
+          if (!expandedUrl) {
+            return; // skip for current link
           }
+          this.enqueue({
+            url: expandedUrl,
+            rootUrl: getBaseUrl(expandedUrl),
+            priority: 1
+          });
         })();
       });
-      await this.cache.delist(item);
     } catch (e) {
-      logger.error(`Unable to retrieve page ${url}`);
-      logger.error(e);
-      // TODO put link in the retry queue, if need be.
+      // silently fail for error TODO
     }
+  }
+
+  async hashPageAndPutInDb({ url, data, lastScraped, intervalMs }) {
+    const hashedStr = hash(data);
+    const hashedItem = new HashedItem({
+      url,
+      hashedStr,
+      lastScraped,
+      intervalMs
+    });
+    return hashedItem.save();
+  }
+
+  async scrapePage(jobId, item) {
+    const { url, rootUrl } = item;
+    const hashedItem = await HashedItem.findOne({ url });
+
+    if (!hashedItem) {
+      const result = await axios.get(url);
+      const { data } = result.data;
+      await this.scrapeAllLinksAndPutInQueue(rootUrl, data);
+      await this.hashPageAndPutInDb({
+        url,
+        data,
+        lastScraped: Date.now(),
+        intervalMs: DEFAULT_CACHE_TIME_MS
+      });
+      return Promise.resolve(true);
+    }
+
+    const { hashedStr, lastScraped, intervalMs } = hashedItem;
+
+    // if time not reached yet, ignore
+    const isTimeReached = lastScraped + intervalMs > new Date();
+    if (!isTimeReached) {
+      return Promise.resolve(false);
+    }
+
+    // retrieve page
+    const result = await axios.get(url);
+    const { data } = result.data;
+    const hashedStrNew = hash(data);
+
+    // if hash same, increase time persistency in cache
+    if (hashedStrNew === hashedStr) {
+      await HashedItem.findOneAndUpdate(
+        { url },
+        {
+          lastScraped: new Date(),
+          intervalMs: Math.floor(intervalMs * 2, MAX_CACHE_TIME_MS)
+        },
+        { upsert: true }
+      );
+      return Promise.resolve(false);
+    }
+
+    // if hash is different, update hash and put in DB
+    await this.scrapeAllLinksAndPutInQueue(rootUrl, data);
+    await HashedItem.findOneAndUpdate(
+      { url },
+      {
+        hashedStr: hashedStrNew,
+        lastScraped: new Date(),
+        intervalMs: Math.ceil(intervalMs / 2, MIN_CACHE_TIME_MS)
+      },
+      { upsert: true }
+    );
+    return Promise.resolve(true);
   }
 }
 
