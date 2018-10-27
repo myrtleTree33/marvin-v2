@@ -1,6 +1,11 @@
 {
-  "extends": [
-    "airbnb-base",
-    "plugin:prettier/recommended"
+  "extends": ["airbnb-base", "plugin:prettier/recommended"],
+  "overrides": [
+    {
+      "files": ["*.js"],
+      "rules": {
+        "class-methods-use-this": "off"
+      }
+    }
   ]
 }

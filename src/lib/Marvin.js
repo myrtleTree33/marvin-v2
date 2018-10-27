@@ -7,6 +7,7 @@ import logger from './util/logger';
 import { genNumArray, hash } from './Utils';
 import HashedItem from './models/HashedItem';
 import Item from './models/Item';
+import QueueItem from './models/QueueItem';
 
 const DEFAULT_CACHE_TIME_MS = 1000 * 60 * 60 * 2; // 2 hours
 const MIN_CACHE_TIME_MS = 1000 * 60 * 60 * 2; // 2 hours
@@ -27,7 +28,8 @@ class Marvin {
 
     // load URL by default, if specified.
     if (rootUrl) {
-      this.loadUrl({ rootUrl, priority: -1 });
+      this.enqueue({ rootUrl, url: rootUrl, priority: -1 });
+      logger.info(`Adding URL=${rootUrl} to queue.`);
       return;
     }
     logger.info('No rootURL specified; proceeding to draw from queue.');
@@ -35,28 +37,15 @@ class Marvin {
 
   async enqueue({ rootUrl, url, priority }) {
     const queueItem = new QueueItem({ rootUrl, url, priority });
-    await QueueItem.findOneAndUpdate(
-      {
-        url
-      },
-      queueItem,
-      { upsert: true }
-    );
-    logger.info(`Adding URL=${url} to queue.`);
-  }
-
-  loadUrl({ url, priority = -1 }) {
-    (async () => {
-      await this.enqueue({ rootUrl: url, url, priority });
-    })();
-    return this;
+    queueItem.save().catch(e => {}); // ignore for existing item in queue
   }
 
   async next() {
     const nextQueueItem = await QueueItem.findOneAndDelete({});
-    if (!this.nextQueueItem) {
+    if (!nextQueueItem) {
       return Promise.resolve(null);
     }
+    logger.debug(`Next url to poll, url=${nextQueueItem.url}`);
     return nextQueueItem;
   }
 
@@ -73,14 +62,14 @@ class Marvin {
 
           // attempt to scrape page if item in queue
           if (queueItem) {
-            scrapeSuccessful = false;
+            scrapeSuccessful = true;
             try {
-              scrapeSuccessful = await this.scrapePage(jobId, item);
+              scrapeSuccessful = await this.scrapePage(jobId, queueItem);
             } catch (e) {}
           } else {
             // this is to prevent overpolling if there is no item to retrieve
             logger.info(`[jobId=${jobId}] No item in queue, sleeping..`);
-            sleep(timeDelay);
+            await sleep(200);
           }
         }
 
@@ -103,10 +92,12 @@ class Marvin {
     });
   }
 
-  async scrapeAllLinksAndPutInQueue(rootUrl, data) {
+  async scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data }) {
     try {
       const $ = cheerio.load(data);
       // enqueue each URL found
+
+      // TODO IMPROVEMENT: the list of urls should be limited to a set, before adding
       $('a').each((i, link) => {
         (async () => {
           const expandedRelUrl = $(link).attr('href');
@@ -114,11 +105,16 @@ class Marvin {
           if (!expandedUrl) {
             return; // skip for current link
           }
-          this.enqueue({
-            url: expandedUrl,
-            rootUrl: getBaseUrl(expandedUrl),
-            priority: 1
-          });
+          try {
+            await this.enqueue({
+              url: expandedUrl,
+              rootUrl: getBaseUrl(expandedUrl),
+              priority: 1
+            });
+          } catch (e) {
+            return; // do not show msg below
+          }
+          logger.debug(`JobId=${jobId} Enquing url=${expandedUrl}`);
         })();
       });
     } catch (e) {
@@ -148,11 +144,13 @@ class Marvin {
   async scrapePage(jobId, item) {
     const { url, rootUrl } = item;
     const hashedItem = await HashedItem.findOne({ url });
+    logger.info(`Processing url=${url}..`);
 
     if (!hashedItem) {
+      logger.info(`url=${url} is new, adding..`);
       const result = await axios.get(url);
-      const { data } = result.data;
-      await this.scrapeAllLinksAndPutInQueue(rootUrl, data);
+      const { data } = result;
+      await this.scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data });
       await this.hashPageAndPutInDb({
         url,
         data,
@@ -166,18 +164,20 @@ class Marvin {
     const { hashedStr, lastScraped, intervalMs } = hashedItem;
 
     // if time not reached yet, ignore
-    const isTimeReached = lastScraped + intervalMs > new Date();
+    const isTimeReached = lastScraped.getTime() + intervalMs < Date.now();
     if (!isTimeReached) {
       return Promise.resolve(false);
     }
 
     // retrieve page
     const result = await axios.get(url);
-    const { data } = result.data;
+    const { data } = result;
     const hashedStrNew = hash(data);
 
     // if hash same, increase time persistency in cache
     if (hashedStrNew === hashedStr) {
+      logger.info('IGNORING PAGE..');
+      logger.info(`JobId=${jobId} Increasing time interval for url=${url}`);
       await HashedItem.findOneAndUpdate(
         { url },
         {
@@ -190,7 +190,9 @@ class Marvin {
     }
 
     // if hash is different, update hash and put in DB
-    await this.scrapeAllLinksAndPutInQueue(rootUrl, data);
+    // TODO improvement: this can be parallel
+    logger.info(`JobId=${jobId} Reducing time interval for url=${url}`);
+    await this.scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data });
     await HashedItem.findOneAndUpdate(
       { url },
       {

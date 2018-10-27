@@ -5,8 +5,6 @@ import app from 'commander';
 
 import Marvin from './lib/Marvin';
 import logger from './lib/util/logger';
-import MongoStore from './lib/stores/MongoStore';
-import MongoCache from './lib/caches/MongoCache';
 
 export default function runMain() {
   app
