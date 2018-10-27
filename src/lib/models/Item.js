@@ -8,7 +8,7 @@ const itemSchema = new Schema({
     unique: true
   },
   htmlText: String,
-  dateScraped: { type: Date, default: Date.now }
+  lastUpdated: { type: Date, default: Date.now }
 });
 
 export default mongoose.model('Item', itemSchema);

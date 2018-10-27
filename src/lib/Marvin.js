@@ -34,12 +34,12 @@ class Marvin {
   }
 
   async enqueue({ rootUrl, url, priority }) {
-    const item = new Item({ rootUrl, url, priority });
-    await Item.findOneAndUpdate(
+    const queueItem = new QueueItem({ rootUrl, url, priority });
+    await QueueItem.findOneAndUpdate(
       {
         url
       },
-      item,
+      queueItem,
       { upsert: true }
     );
     logger.info(`Adding URL=${url} to queue.`);
@@ -53,11 +53,11 @@ class Marvin {
   }
 
   async next() {
-    const nextItem = await Item.findOneAndDelete({});
-    if (!this.nextItem) {
+    const nextQueueItem = await QueueItem.findOneAndDelete({});
+    if (!this.nextQueueItem) {
       return Promise.resolve(null);
     }
-    return nextItem;
+    return nextQueueItem;
   }
 
   start() {
@@ -69,10 +69,10 @@ class Marvin {
       (async () => {
         let scrapeSuccessful = false;
         while (!scrapeSuccessful) {
-          const item = await this.next();
+          const queueItem = await this.next();
 
           // attempt to scrape page if item in queue
-          if (item) {
+          if (queueItem) {
             scrapeSuccessful = false;
             try {
               scrapeSuccessful = await this.scrapePage(jobId, item);
@@ -137,6 +137,14 @@ class Marvin {
     return hashedItem.save();
   }
 
+  async savePage({ url, htmlText }) {
+    await Item.findOneAndUpdate(
+      { url },
+      { htmlText, lastUpdated: new Date() },
+      { upsert: true }
+    );
+  }
+
   async scrapePage(jobId, item) {
     const { url, rootUrl } = item;
     const hashedItem = await HashedItem.findOne({ url });
@@ -151,6 +159,7 @@ class Marvin {
         lastScraped: Date.now(),
         intervalMs: DEFAULT_CACHE_TIME_MS
       });
+      await this.savePage({ url, htmlText: data });
       return Promise.resolve(true);
     }
 
@@ -191,6 +200,7 @@ class Marvin {
       },
       { upsert: true }
     );
+    await this.savePage({ url, htmlText: data });
     return Promise.resolve(true);
   }
 }
