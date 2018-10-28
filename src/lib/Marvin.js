@@ -4,14 +4,10 @@ import sleep from 'await-sleep';
 
 import { resolveUrl, getBaseUrl } from './UrlUtils';
 import logger from './util/logger';
-import { genNumArray, hash } from './Utils';
+import { genNumArray, hash, hashesAreSimilar } from './Utils';
 import HashedItem from './models/HashedItem';
 import Item from './models/Item';
 import QueueItem from './models/QueueItem';
-
-const DEFAULT_CACHE_TIME_MS = 1000 * 60 * 60 * 2; // 2 hours
-const MIN_CACHE_TIME_MS = 1000 * 60 * 60 * 2; // 2 hours
-const MAX_CACHE_TIME_MS = 1000 * 60 * 60 * 24 * 2; // 2 Days
 
 class Marvin {
   constructor({
@@ -19,12 +15,20 @@ class Marvin {
     minInterval = 200,
     randInterval = 2000,
     numJobs = 1,
-    jobsIntervalMaxSeedMs = 2000
+    jobsIntervalMaxSeedMs = 2000,
+    defaultCacheTimeMs = 1000 * 60 * 60 * 2, // 2 hours
+    minCacheTimeMs = 1000 * 60 * 60 * 2, // 2 hours
+    maxCacheTimeMs = 1000 * 60 * 60 * 24 * 2, // 2 days
+    maxDiffTolerance = 0.12
   }) {
     this.minInterval = minInterval;
     this.randInterval = randInterval;
     this.numJobs = numJobs;
     this.jobsIntervalMaxSeedMs = jobsIntervalMaxSeedMs;
+    this.defaultCacheTimeMs = defaultCacheTimeMs;
+    this.minCacheTimeMs = minCacheTimeMs;
+    this.maxCacheTimeMs = maxCacheTimeMs;
+    this.maxDiffTolerance = maxDiffTolerance;
 
     // load URL by default, if specified.
     if (rootUrl) {
@@ -123,10 +127,10 @@ class Marvin {
   }
 
   async hashPageAndPutInDb({ url, data, lastScraped, intervalMs }) {
-    const hashedStr = hash(data);
+    const hashedObj = hash(data);
     const hashedItem = new HashedItem({
       url,
-      hashedStr,
+      hashedObj,
       lastScraped,
       intervalMs
     });
@@ -155,13 +159,13 @@ class Marvin {
         url,
         data,
         lastScraped: Date.now(),
-        intervalMs: DEFAULT_CACHE_TIME_MS
+        intervalMs: this.defaultCacheTimeMs
       });
       await this.savePage({ url, htmlText: data });
       return Promise.resolve(true);
     }
 
-    const { hashedStr, lastScraped, intervalMs } = hashedItem;
+    const { hashedObj, lastScraped, intervalMs } = hashedItem;
 
     // if time not reached yet, ignore
     const isTimeReached = lastScraped.getTime() + intervalMs < Date.now();
@@ -172,17 +176,17 @@ class Marvin {
     // retrieve page
     const result = await axios.get(url);
     const { data } = result;
-    const hashedStrNew = hash(data);
+    const hashedObjNew = hash(data);
 
     // if hash same, increase time persistency in cache
-    if (hashedStrNew === hashedStr) {
+    if (hashesAreSimilar(hashedObj, hashedObjNew, this.maxDiffTolerance)) {
       logger.info('IGNORING PAGE..');
       logger.info(`JobId=${jobId} Increasing time interval for url=${url}`);
       await HashedItem.findOneAndUpdate(
         { url },
         {
           lastScraped: new Date(),
-          intervalMs: Math.floor(intervalMs * 2, MAX_CACHE_TIME_MS)
+          intervalMs: Math.floor(intervalMs * 2, this.maxCacheTimeMs)
         },
         { upsert: true }
       );
@@ -196,9 +200,9 @@ class Marvin {
     await HashedItem.findOneAndUpdate(
       { url },
       {
-        hashedStr: hashedStrNew,
+        hashedObj: hashedObjNew,
         lastScraped: new Date(),
-        intervalMs: Math.ceil(intervalMs / 2, MIN_CACHE_TIME_MS)
+        intervalMs: Math.ceil(intervalMs / 2, this.minCacheTimeMs)
       },
       { upsert: true }
     );

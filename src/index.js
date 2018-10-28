@@ -35,8 +35,8 @@ export default function runMain() {
   mongoose.connect(app.uri);
 
   const marvin = new Marvin({
-    // rootUrl: 'https://www.kompasiana.com/',
-    rootUrl: app.scrapeUrl,
+    rootUrl: 'https://www.kompasiana.com/',
+    // rootUrl: app.scrapeUrl,
     minInterval: app.minInterval,
     randInterval: app.randInterval,
     numJobs: app.numJobs,

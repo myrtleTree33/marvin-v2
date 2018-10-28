@@ -8,8 +8,8 @@ const hashedItemSchema = new Schema({
     unique: true,
     required: true
   },
-  hashedStr: {
-    type: String,
+  hashedObj: {
+    type: Object,
     required: true
   },
   lastScraped: {
