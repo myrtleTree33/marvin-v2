@@ -30,6 +30,26 @@ export default function runMain() {
       '-s, --scrapeUrl [url]',
       'The URL to start scraping.  If not specified, pulls one from the dsitributed queue.'
     )
+    .option(
+      '-z, --defaultCacheTimeMs [millisecs]',
+      'The default persistency cache time to use for hashes',
+      1000 * 60 * 60 * 2
+    )
+    .option(
+      '-x, --minCacheTimeMs [millisecs]',
+      'The min persistency cache time to use for hashes',
+      1000 * 60 * 60 * 2
+    )
+    .option(
+      '-c, --maxCacheTimeMs [millisecs]',
+      'The max persistency cache time to use for hashes',
+      1000 * 60 * 60 * 24 * 2
+    )
+    .option(
+      '-v, --maxDiffTolerance [float]',
+      'The maximum diff tolerance to use for comparison between hashes',
+      0.12
+    )
     .parse(process.argv);
 
   mongoose.connect(app.uri);
@@ -40,7 +60,11 @@ export default function runMain() {
     minInterval: app.minInterval,
     randInterval: app.randInterval,
     numJobs: app.numJobs,
-    jobsIntervalMaxSeedMs: app.jobsIntervalMs
+    jobsIntervalMaxSeedMs: app.jobsIntervalMs,
+    defaultCacheTimeMs: app.defaultCacheTimeMs, // 2 hours
+    minCacheTimeMs: app.minCacheTimeMs, // 2 hours
+    maxCacheTimeMs: app.maxCacheTimeMs, // 2 days
+    maxDiffTolerance: app.maxDiffTolerance
   });
   marvin.start();
 }
