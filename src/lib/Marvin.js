@@ -8,6 +8,7 @@ import { genNumArray, hash, hashesAreSimilar } from './Utils';
 import HashedItem from './models/HashedItem';
 import Item from './models/Item';
 import QueueItem from './models/QueueItem';
+import Boilerpipe from 'boilerpipe';
 
 class Marvin {
   constructor({
@@ -60,21 +61,21 @@ class Marvin {
 
     const runJob = jobId => {
       (async () => {
-        let scrapeSuccessful = false;
-        while (!scrapeSuccessful) {
-          const queueItem = await this.next();
-
-          // attempt to scrape page if item in queue
-          if (queueItem) {
-            scrapeSuccessful = true;
-            try {
-              scrapeSuccessful = await this.scrapePage(jobId, queueItem);
-            } catch (e) {}
-          } else {
+        let queueItem = null;
+        while (!queueItem) {
+          queueItem = await this.next();
+          if (!queueItem) {
             // this is to prevent overpolling if there is no item to retrieve
             logger.info(`[jobId=${jobId}] No item in queue, sleeping..`);
-            await sleep(200);
+            await sleep(1000);
           }
+        }
+
+        // attempt to scrape page if item in queue
+        try {
+          await this.scrapePage(jobId, queueItem);
+        } catch (e) {
+          console.error(e);
         }
 
         // rerun job again
@@ -126,8 +127,8 @@ class Marvin {
     }
   }
 
-  async hashPageAndPutInDb({ url, data, lastScraped, intervalMs }) {
-    const hashedObj = hash(data);
+  async hashPageAndPutInDb({ url, plainText, lastScraped, intervalMs }) {
+    const hashedObj = hash(plainText);
     const hashedItem = new HashedItem({
       url,
       hashedObj,
@@ -137,12 +138,44 @@ class Marvin {
     return hashedItem.save();
   }
 
-  async savePage({ url, htmlText }) {
-    await Item.findOneAndUpdate(
+  async savePage({ url, title, plainText }) {
+    if (!plainText) {
+      // ignore upsert silently if no plainText payload
+      return Promise.resolve();
+    }
+
+    return Item.findOneAndUpdate(
       { url },
-      { htmlText, lastUpdated: new Date() },
+      { title, plainText, lastUpdated: new Date() },
       { upsert: true }
     );
+  }
+
+  async extractTitle({ htmlText }) {
+    const $ = cheerio.load(htmlText);
+    const title = $('title').text();
+    return Promise.resolve(title);
+  }
+
+  async extractArticleText({ htmlText }) {
+    return new Promise((resolve, reject) => {
+      const boilerpipe = new Boilerpipe({
+        extractor: Boilerpipe.Extractor.Article,
+        html: htmlText
+      });
+
+      boilerpipe.getText((err, text) => {
+        if (err) {
+          return reject(text);
+        }
+        const resolvedText = text
+          .replace(/Advertisement/g, '')
+          .replace(/\n/g, '\n\n')
+          .replace('\n\n\n+', '\n\n');
+
+        return resolve(resolvedText);
+      });
+    });
   }
 
   async scrapePage(jobId, item) {
@@ -154,14 +187,17 @@ class Marvin {
       logger.info(`url=${url} is new, adding..`);
       const result = await axios.get(url);
       const { data } = result;
+      //TOFDO -------------------------------------------------
       await this.scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data });
+      const plainText = await this.extractArticleText({ htmlText: data });
+      const title = await this.extractTitle({ htmlText: data });
       await this.hashPageAndPutInDb({
         url,
-        data,
+        plainText,
         lastScraped: Date.now(),
         intervalMs: this.defaultCacheTimeMs
       });
-      await this.savePage({ url, htmlText: data });
+      await this.savePage({ url, title, plainText });
       return Promise.resolve(true);
     }
 
@@ -206,7 +242,9 @@ class Marvin {
       },
       { upsert: true }
     );
-    await this.savePage({ url, htmlText: data });
+    const plainText = await this.extractArticleText({ htmlText: data });
+    const title = await this.extractTitle({ htmlText: data });
+    await this.savePage({ url, title, plainText });
     return Promise.resolve(true);
   }
 }

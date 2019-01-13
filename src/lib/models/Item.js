@@ -7,7 +7,11 @@ const itemSchema = new Schema({
     type: String,
     unique: true
   },
-  htmlText: String,
+  title: {
+    type: String,
+    required: true
+  },
+  plainText: String,
   lastUpdated: { type: Date, default: Date.now }
 });
 

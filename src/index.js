@@ -9,7 +9,11 @@ import logger from './lib/util/logger';
 export default function runMain() {
   app
     .version('0.0.1')
-    .option('-u, --uri [uri]', 'Mongo URI to use', 'mongodb://localhost/test')
+    .option(
+      '-u, --uri [uri]',
+      'Mongo URI to use',
+      'mongodb://localhost/newsfeed'
+    )
     .option(
       '-M, --min-interval [mSecs]',
       'The minimum interval between requests, in milliseconds',
