@@ -3,8 +3,13 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
 const itemSchema = new Schema({
+  originUrl: {
+    type: String,
+    required: true
+  },
   url: {
     type: String,
+    required: true,
     unique: true
   },
   title: {
@@ -12,7 +17,16 @@ const itemSchema = new Schema({
     required: true
   },
   plainText: String,
-  lastUpdated: { type: Date, default: Date.now }
+  lastUpdated: {
+    required: true,
+    type: Date,
+    default: Date.now
+  },
+  firstCreated: {
+    required: true,
+    type: Date,
+    default: Date.now
+  }
 });
 
 export default mongoose.model('Item', itemSchema);

@@ -1,6 +1,7 @@
 import cheerio from 'cheerio';
 import axios from 'axios';
 import sleep from 'await-sleep';
+import Boilerpipe from 'boilerpipe';
 
 import { resolveUrl, getBaseUrl } from './UrlUtils';
 import logger from './util/logger';
@@ -8,7 +9,6 @@ import { genNumArray, hash, hashesAreSimilar } from './Utils';
 import HashedItem from './models/HashedItem';
 import Item from './models/Item';
 import QueueItem from './models/QueueItem';
-import Boilerpipe from 'boilerpipe';
 
 class Marvin {
   constructor({
@@ -57,9 +57,11 @@ class Marvin {
   start() {
     logger.info('Marvin V2 started.');
     const { minInterval, randInterval } = this;
-    const timeDelay = minInterval + Math.random() * randInterval;
+    let timeDelay = minInterval + Math.random() * randInterval;
 
     const runJob = jobId => {
+      // reset with new time delay
+      timeDelay = minInterval + Math.random() * randInterval;
       (async () => {
         let queueItem = null;
         while (!queueItem) {
@@ -144,10 +146,15 @@ class Marvin {
       return Promise.resolve();
     }
 
+    const originUrl = new URL(url).origin;
+
     return Item.findOneAndUpdate(
       { url },
-      { title, plainText, lastUpdated: new Date() },
-      { upsert: true }
+      { originUrl, title, plainText, lastUpdated: new Date() },
+      {
+        upsert: true,
+        setDefaultsOnInsert: true
+      }
     );
   }
 
@@ -186,10 +193,17 @@ class Marvin {
     if (!hashedItem) {
       logger.info(`url=${url} is new, adding..`);
       const result = await axios.get(url);
-      const { data } = result;
-      //TOFDO -------------------------------------------------
+      const { data, headers } = result;
+
+      // if not html page, then reject and ignore
+      const contentType = headers['content-type'] || '';
+      if (!contentType.includes('text/html')) {
+        console.log(`Ignoring ${url}, as content-type is ${contentType}`);
+        return Promise.resolve(false);
+      }
       await this.scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data });
       const plainText = await this.extractArticleText({ htmlText: data });
+      // console.log('!!!');
       const title = await this.extractTitle({ htmlText: data });
       await this.hashPageAndPutInDb({
         url,
@@ -200,6 +214,8 @@ class Marvin {
       await this.savePage({ url, title, plainText });
       return Promise.resolve(true);
     }
+
+    console.log('---');
 
     const { hashedObj, lastScraped, intervalMs } = hashedItem;
 
