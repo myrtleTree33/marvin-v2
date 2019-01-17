@@ -12,6 +12,14 @@ const queueItemSchema = new Schema({
     type: String,
     required: true
   },
+  depth: {
+    type: Number,
+    required: true
+  },
+  maxRandDelayMs: {
+    type: Number,
+    required: true
+  },
   priority: Number,
   dateAdded: { type: Date, default: Date.now }
 });

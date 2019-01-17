@@ -40,9 +40,21 @@ class Marvin {
     logger.info('No rootURL specified; proceeding to draw from queue.');
   }
 
-  async enqueue({ rootUrl, url, priority }) {
-    const queueItem = new QueueItem({ rootUrl, url, priority });
-    queueItem.save().catch(e => {}); // ignore for existing item in queue
+  async enqueue({ rootUrl, url, priority, depth, maxRandDelayMs }) {
+    const queueItem = new QueueItem({
+      rootUrl,
+      url,
+      priority,
+      depth,
+      maxRandDelayMs
+    });
+    queueItem.save().catch(e => {
+      if (e && e.code !== 11000) {
+        // ignore for existing item in queue
+        // (duplicate key error: 11000)
+        logger.error(e);
+      }
+    });
   }
 
   async next() {
@@ -77,7 +89,7 @@ class Marvin {
         try {
           await this.scrapePage(jobId, queueItem);
         } catch (e) {
-          console.error(e);
+          logger.error(e);
         }
 
         // rerun job again
@@ -99,11 +111,29 @@ class Marvin {
     });
   }
 
-  async scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data }) {
+  async scrapeAllLinksAndPutInQueue({
+    jobId,
+    rootUrl,
+    data,
+    depth,
+    maxRandDelayMs
+  }) {
     try {
-      const $ = cheerio.load(data);
-      // enqueue each URL found
+      // if depth is -1, means infinite depth.
+      // leave depth at -1.
+      // else decrement depth.
+      const newDepth = depth !== -1 ? depth - 1 : -1;
 
+      if (newDepth === 0) {
+        // do not enqueue and
+        // exit early; max depth reached
+        logger.log('terminating as max depth reached.');
+        return;
+      }
+
+      const $ = cheerio.load(data);
+
+      // enqueue each URL found
       // TODO IMPROVEMENT: the list of urls should be limited to a set, before adding
       $('a').each((i, link) => {
         (async () => {
@@ -116,9 +146,12 @@ class Marvin {
             await this.enqueue({
               url: expandedUrl,
               rootUrl: getBaseUrl(expandedUrl),
+              depth: newDepth,
+              maxRandDelayMs,
               priority: 1
             });
           } catch (e) {
+            logger.error(e);
             return; // do not show msg below
           }
           logger.debug(`JobId=${jobId} Enquing url=${expandedUrl}`);
@@ -186,7 +219,13 @@ class Marvin {
   }
 
   async scrapePage(jobId, item) {
-    const { url, rootUrl } = item;
+    const { url, rootUrl, depth, maxRandDelayMs } = item;
+
+    // sleep for maxRandDelayMs before continuing
+    const sleepTime = Math.random() * maxRandDelayMs;
+    logger.debug(`Sleeping for ${sleepTime}..`);
+    await sleep(sleepTime);
+
     const hashedItem = await HashedItem.findOne({ url });
     logger.info(`Processing url=${url}..`);
 
@@ -198,12 +237,17 @@ class Marvin {
       // if not html page, then reject and ignore
       const contentType = headers['content-type'] || '';
       if (!contentType.includes('text/html')) {
-        console.log(`Ignoring ${url}, as content-type is ${contentType}`);
+        logger.debug(`Ignoring ${url}, as content-type is ${contentType}`);
         return Promise.resolve(false);
       }
-      await this.scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data });
+      await this.scrapeAllLinksAndPutInQueue({
+        jobId,
+        rootUrl,
+        data,
+        depth,
+        maxRandDelayMs
+      });
       const plainText = await this.extractArticleText({ htmlText: data });
-      // console.log('!!!');
       const title = await this.extractTitle({ htmlText: data });
       await this.hashPageAndPutInDb({
         url,
@@ -214,8 +258,6 @@ class Marvin {
       await this.savePage({ url, title, plainText });
       return Promise.resolve(true);
     }
-
-    console.log('---');
 
     const { hashedObj, lastScraped, intervalMs } = hashedItem;
 
@@ -248,7 +290,13 @@ class Marvin {
     // if hash is different, update hash and put in DB
     // TODO improvement: this can be parallel
     logger.info(`JobId=${jobId} Reducing time interval for url=${url}`);
-    await this.scrapeAllLinksAndPutInQueue({ jobId, rootUrl, data });
+    await this.scrapeAllLinksAndPutInQueue({
+      jobId,
+      rootUrl,
+      data,
+      depth,
+      maxRandDelayMs
+    });
     await HashedItem.findOneAndUpdate(
       { url },
       {

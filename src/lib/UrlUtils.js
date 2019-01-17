@@ -4,6 +4,14 @@ export function getBaseUrl(absoluteUrl) {
   return new URL(absoluteUrl).origin;
 }
 
+function getRootDomain(url) {
+  const tokens = url.host.split('.');
+  if (tokens.length < 3) {
+    return url.host;
+  }
+  return tokens.splice(1).join('.');
+}
+
 export function resolveUrl(baseUrl, urlToAdd) {
   try {
     if (!baseUrl || !urlToAdd) {
@@ -19,7 +27,7 @@ export function resolveUrl(baseUrl, urlToAdd) {
     }
 
     // different origins
-    if (baseUrl2.origin !== resolvedUrl.origin) {
+    if (getRootDomain(baseUrl2) !== getRootDomain(resolvedUrl)) {
       return null;
     }
 
