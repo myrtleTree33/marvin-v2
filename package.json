@@ -72,8 +72,6 @@
     "priorityqueue": "^0.2.1",
     "request": "^2.88.0",
     "string-strip-html": "^3.2.0",
-    "winston": "^3.1.0",
-    "xxhash": "^0.2.4",
-    "xxhashjs": "^0.2.2"
+    "winston": "^3.1.0"
   }
 }
