@@ -80,7 +80,7 @@ class Marvin {
           queueItem = await this.next();
           if (!queueItem) {
             // this is to prevent overpolling if there is no item to retrieve
-            logger.info(`[jobId=${jobId}] No item in queue, sleeping..`);
+            logger.debug(`[jobId=${jobId}] No item in queue, sleeping..`);
             await sleep(1000);
           }
         }
@@ -123,11 +123,10 @@ class Marvin {
       // leave depth at -1.
       // else decrement depth.
       const newDepth = depth !== -1 ? depth - 1 : -1;
-
       if (newDepth === 0) {
         // do not enqueue and
         // exit early; max depth reached
-        logger.log('terminating as max depth reached.');
+        logger.debug('terminating as max depth reached.');
         return;
       }
 
@@ -274,7 +273,6 @@ class Marvin {
 
     // if hash same, increase time persistency in cache
     if (hashesAreSimilar(hashedObj, hashedObjNew, this.maxDiffTolerance)) {
-      logger.info('IGNORING PAGE..');
       logger.info(`JobId=${jobId} Increasing time interval for url=${url}`);
       await HashedItem.findOneAndUpdate(
         { url },
