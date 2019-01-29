@@ -28,20 +28,20 @@ export function hashesAreSimilar(oldHash, newHash, maxDiffTolerance = 0.1) {
 
   // if the page had invalid filtering, no chars will be shown.
   // in that case, default to FALSE (hashes are not similar, force update.)
-  let containsNonZero = false;
+  // let containsNonZero = false;
 
   for (const [k, v] of Object.entries(oldHash)) {
     if (v === 0) {
       continue; // ignore for divide by infinity
     }
-    containsNonZero = true; // v is non zero
+    // containsNonZero = true; // v is non zero
     diffToleranceCalc += Math.abs(v - newHash[k]) / v;
   }
 
-  if (!containsNonZero) {
-    // force update as page is blank page.
-    return false;
-  }
+  // if (!containsNonZero) {
+  //   // force update as page is blank page.
+  //   return false;
+  // }
 
   diffToleranceCalc /= Object.entries(oldHash).length;
   logger.info(`--- HASH COEFFICIENT=${diffToleranceCalc} ---`);
