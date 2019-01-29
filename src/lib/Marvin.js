@@ -161,8 +161,8 @@ class Marvin {
     }
   }
 
-  async hashPageAndPutInDb({ url, plainText, lastScraped, intervalMs }) {
-    const hashedObj = hash(plainText);
+  async hashPageAndPutInDb({ url, data, lastScraped, intervalMs }) {
+    const hashedObj = hash(data);
     const hashedItem = new HashedItem({
       url,
       hashedObj,
@@ -250,7 +250,7 @@ class Marvin {
       const title = await this.extractTitle({ htmlText: data });
       await this.hashPageAndPutInDb({
         url,
-        plainText,
+        data,
         lastScraped: Date.now(),
         intervalMs: this.defaultCacheTimeMs
       });
