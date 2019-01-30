@@ -182,7 +182,7 @@ class Marvin {
 
     return Item.findOneAndUpdate(
       { url },
-      { originUrl, title, plainText, lastUpdated: new Date() },
+      { originUrl, title, plainText },
       {
         upsert: true,
         setDefaultsOnInsert: true
