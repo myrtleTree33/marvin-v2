@@ -24,7 +24,7 @@ export function hash(s) {
 }
 
 export function hashesAreSimilar(oldHash, newHash, maxDiffTolerance = 0.1) {
-  return true; // TODO monkey patch to force update
+  return false; // TODO monkey patch to force update
   // let diffToleranceCalc = 0;
 
   // // if the page had invalid filtering, no chars will be shown.
