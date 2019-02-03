@@ -52,7 +52,8 @@ class Marvin {
       if (e && e.code !== 11000) {
         // ignore for existing item in queue
         // (duplicate key error: 11000)
-        logger.error(e);
+        // logger.error(e);
+        logger.error(`Error occured scraping url=${url}`);
       }
     });
   }
@@ -89,7 +90,7 @@ class Marvin {
         try {
           await this.scrapePage(jobId, queueItem);
         } catch (e) {
-          logger.error(e);
+          logger.error(`Error occured scraping jobId=${jobId}`);
         }
 
         // rerun job again
@@ -150,7 +151,7 @@ class Marvin {
               priority: 1
             });
           } catch (e) {
-            logger.error(e);
+            logger.error(`Error enquing url=${expandedUrl}`);
             return; // do not show msg below
           }
           logger.debug(`JobId=${jobId} Enquing url=${expandedUrl}`);
